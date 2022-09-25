@@ -1,2 +1,0 @@
-# mvvm.js
-MVVM Demo
