@@ -9,14 +9,10 @@
  *  https://github.com/shixiongfei/mvvm.js
  */
 
-class Model {
-  constructor() {
-    this.todos = JSON.parse(localStorage.getItem('todos')) || []
+class Proxy {
+  constructor(data) {
+    this.data = data
     this.listeners = []
-
-    this.subscribe(todos =>
-      localStorage.setItem('todos', JSON.stringify(todos))
-    )
   }
 
   subscribe(listener) {
@@ -24,12 +20,34 @@ class Model {
   }
 
   notify() {
-    this.listeners.forEach(listener => listener(this.todos))
+    this.listeners.forEach(listener => listener(this.data))
   }
 
-  set(todos) {
-    this.todos = todos
+  get() {
+    return this.data
+  }
+
+  set(data) {
+    this.data = data
     this.notify()
+  }
+}
+
+class Model {
+  constructor() {
+    this._todos = new Proxy(JSON.parse(localStorage.getItem('todos')) || [])
+
+    this.onTodosChanged(todos =>
+      localStorage.setItem('todos', JSON.stringify(todos))
+    )
+  }
+
+  get todos() {
+    return this._todos.get()
+  }
+
+  onTodosChanged(listener) {
+    this._todos.subscribe(listener)
   }
 
   addTodo(todoText) {
@@ -38,11 +56,11 @@ class Model {
       text: todoText,
       complete: false
     }
-    this.set(this.todos.concat([todo]))
+    this._todos.set(this.todos.concat([todo]))
   }
 
   editTodo(id, updatedText) {
-    this.set(
+    this._todos.set(
       this.todos.map(todo =>
         todo.id === id
           ? { id: todo.id, text: updatedText, complete: todo.complete }
@@ -52,11 +70,11 @@ class Model {
   }
 
   deleteTodo(id) {
-    this.set(this.todos.filter(todo => todo.id !== id))
+    this._todos.set(this.todos.filter(todo => todo.id !== id))
   }
 
   toggleTodo(id) {
-    this.set(
+    this._todos.set(
       this.todos.map(todo =>
         todo.id === id
           ? { id: todo.id, text: todo.text, complete: !todo.complete }
@@ -67,7 +85,10 @@ class Model {
 }
 
 class View {
-  constructor() {
+  constructor(viewModel) {
+    this.viewModel = viewModel
+    this.viewModel.onTodosChanged(todos => this.update(todos))
+
     this.app = document.querySelector('#root')
     this.form = this.createElement('form')
     this.input = this.createElement('input')
@@ -83,9 +104,40 @@ class View {
     this.app.append(this.title, this.form, this.todoList)
 
     this._temporaryTodoText = ''
+
     this.todoList.addEventListener('input', event => {
       if (event.target.className === 'editable') {
         this._temporaryTodoText = event.target.innerText
+      }
+    })
+
+    this.form.addEventListener('submit', event => {
+      event.preventDefault()
+      if (this.input.value) {
+        this.viewModel.addTodo(this.input.value)
+        this.input.value = ''
+      }
+    })
+
+    this.todoList.addEventListener('click', event => {
+      if (event.target.className === 'delete') {
+        const id = parseInt(event.target.parentElement.id)
+        this.viewModel.deleteTodo(id)
+      }
+    })
+
+    this.todoList.addEventListener('focusout', event => {
+      if (this._temporaryTodoText) {
+        const id = parseInt(event.target.parentElement.id)
+        this.viewModel.editTodo(id, this._temporaryTodoText)
+        this._temporaryTodoText = ''
+      }
+    })
+
+    this.todoList.addEventListener('change', event => {
+      if (event.target.type === 'checkbox') {
+        const id = parseInt(event.target.parentElement.id)
+        this.viewModel.toggleTodo(id)
       }
     })
   }
@@ -139,73 +191,40 @@ class View {
     }
   }
 
-  bindAddTodo(handler) {
-    this.form.addEventListener('submit', event => {
-      event.preventDefault()
-      if (this.input.value) {
-        handler(this.input.value)
-        this.input.value = ''
-      }
-    })
-  }
-
-  bindDeleteTodo(handler) {
-    this.todoList.addEventListener('click', event => {
-      if (event.target.className === 'delete') {
-        const id = parseInt(event.target.parentElement.id)
-        handler(id)
-      }
-    })
-  }
-
-  bindEditTodo(handler) {
-    this.todoList.addEventListener('focusout', event => {
-      if (this._temporaryTodoText) {
-        const id = parseInt(event.target.parentElement.id)
-        handler(id, this._temporaryTodoText)
-        this._temporaryTodoText = ''
-      }
-    })
-  }
-
-  bindToggleTodo(handler) {
-    this.todoList.addEventListener('change', event => {
-      if (event.target.type === 'checkbox') {
-        const id = parseInt(event.target.parentElement.id)
-        handler(id)
-      }
-    })
+  render() {
+    this.viewModel.renderTodos(todos => this.update(todos))
   }
 }
 
 class ViewModel {
-  constructor(view, model) {
-    this.view = view
-    this.model = model
-
-    this.bind()
+  constructor() {
+    this.model = new Model()
   }
 
-  bind() {
-    this.modelBindView()
-    this.viewBindModel()
+  onTodosChanged(handler) {
+    this.model.onTodosChanged(todos => handler(todos))
   }
 
-  modelBindView() {
-    this.model.subscribe(todos => this.view.update(todos))
+  renderTodos(render) {
+    render(this.model.todos)
   }
 
-  viewBindModel() {
-    this.view.bindAddTodo(todoText => this.model.addTodo(todoText))
-    this.view.bindDeleteTodo(id => this.model.deleteTodo(id))
-    this.view.bindEditTodo((id, todoText) => this.model.editTodo(id, todoText))
-    this.view.bindToggleTodo(id => this.model.toggleTodo(id))
+  addTodo(todoText) {
+    this.model.addTodo(todoText)
   }
 
-  render() {
-    this.view.update(this.model.todos)
+  editTodo(id, updatedText) {
+    this.model.editTodo(id, updatedText)
+  }
+
+  deleteTodo(id) {
+    this.model.deleteTodo(id)
+  }
+
+  toggleTodo(id) {
+    this.model.toggleTodo(id)
   }
 }
 
-const app = new ViewModel(new View(), new Model())
+const app = new View(new ViewModel())
 app.render()
